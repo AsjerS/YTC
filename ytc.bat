@@ -8,7 +8,6 @@ setlocal enabledelayedexpansion
 :: #  using FFmpeg and FFprobe.                                      #
 :: ###################################################################
 
-:: Clear the screen for a clean start
 cls
 
 echo =================================================================
@@ -46,7 +45,7 @@ set "OUTPUT_DIR=%INPUT_DIR%"
 set "OUTPUT_FILE=%OUTPUT_DIR%%INPUT_NAME%_YouTube.mp4"
 set "PASSLOG_FILE=%TEMP%\%INPUT_NAME%_ffmpeg_passlog"
 
-:: --- 2. GATHER VIDEO INFORMATION WITH FFPROBE ---
+:: --- 2. GET VIDEO INFORMATION WITH FFPROBE ---
 echo Analyzing "%INPUT_NAME%%~x1"...
 echo Please wait...
 
@@ -122,6 +121,8 @@ if %A_CHANNELS% equ 1 set A_BITRATE_REC=128
 if %A_CHANNELS% gtr 2 set A_BITRATE_REC=512
 
 :: Set recommended Video Bitrate based on height, frame rate, and HDR
+set "BACK_TO_THE_BITRATE=0"
+:BitrateCalculation
 set V_BITRATE_REC=8
 if %IS_HDR% equ 1 (
     echo Detected HDR content. Using HDR bitrate table.
@@ -142,16 +143,56 @@ if %IS_HDR% equ 1 (
     if %V_HEIGHT% leq 480 if %V_HEIGHT% gtr 360 (if %IS_HFR% equ 0 (set V_BITRATE_REC=3) else (set V_BITRATE_REC=4))
     if %V_HEIGHT% leq 360 (if %IS_HFR% equ 0 (set V_BITRATE_REC=1) else (set V_BITRATE_REC=2))
 )
+if "%BACK_TO_THE_BITRATE%"=="1" goto :VideoQualityMenu
 
 :: Set the default encoding mode. This will be changed if the user selects "Lossless".
 set "ENCODE_MODE=BITRATE"
 
 :: --- 4. USER INTERACTION MENUS ---
 
+:UpscaleMenu
+cls
+echo =================================================================
+echo  Step 1: Resolution Upscaling
+echo =================================================================
+echo.
+echo Current Resolution: %V_HEIGHT%p
+echo.
+echo Upscaling to 2x resolution ^(e.g. 720p -^> 1440p^) tricks YouTube
+echo into giving higher quality, but can give diminishing returns
+echo at resolutions higher than 1080p.
+echo.
+echo   [1] Keep Original Resolution (%V_HEIGHT%p) (Default)
+set /a UPSCALED_HEIGHT = V_HEIGHT * 2
+echo   [2] Upscale 2x (%UPSCALED_HEIGHT%p)
+echo.
+
+:: User input handling
+set "USER_CHOICE="
+set "SCALE_FILTER="
+set /p USER_CHOICE="Select an option [Default is 1]: "
+if "%USER_CHOICE%"=="" (
+    set USER_CHOICE=1
+    goto :VideoQualityMenu
+)
+if "%USER_CHOICE%"=="1" (
+    goto :VideoQualityMenu
+)
+if "%USER_CHOICE%"=="2" (
+    set "SCALE_FILTER=-vf scale=iw*2:ih*2:flags=lanczos"
+    set "V_HEIGHT=%UPSCALED_HEIGHT%"
+    set "BACK_TO_THE_BITRATE=1"
+    goto :BitrateCalculation
+)
+echo.
+echo Invalid option: "%USER_CHOICE%". Please enter 1 or 2.
+timeout /t 2 /nobreak >nul
+goto :UpscaleMenu
+
 :VideoQualityMenu
 cls
 echo =================================================================
-echo  Step 1: Choose Video Quality
+echo  Step 2: Choose Video Quality
 echo =================================================================
 echo.
 
@@ -171,43 +212,38 @@ set /a SIZE_MB_DOUBLED = (TOTAL_KBPS_DOUBLED * DURATION) / 8 / 1024
 :: Convert kbps to Mbps for display
 set /a Mbps_INT = V_BITRATE_HALVED_KBPS / 1000
 set /a Mbps_DEC = (V_BITRATE_HALVED_KBPS %% 1000) / 100
-echo   [1] Halved Bitrate  (%Mbps_INT%.%Mbps_DEC% Mbps) - Faster Uploads  (Est: ~%SIZE_MB_HALVED% MB)
+echo   [1] Halved Bitrate  (%Mbps_INT%.%Mbps_DEC% Mbps) - Faster Uploads (Est: ~%SIZE_MB_HALVED% MB)
 
 set /a Mbps_INT = V_BITRATE_NORMAL_KBPS / 1000
 set /a Mbps_DEC = (V_BITRATE_NORMAL_KBPS %% 1000) / 100
-echo   [2] Normal Bitrate  (%Mbps_INT%.%Mbps_DEC% Mbps) - High Quality    (Est: ~%SIZE_MB_NORMAL% MB) - RECOMMENDED
+echo   [2] Normal Bitrate  (%Mbps_INT%.%Mbps_DEC% Mbps) - High Quality   (Est: ~%SIZE_MB_NORMAL% MB) (Default)
 
 set /a Mbps_INT = V_BITRATE_DOUBLED_KBPS / 1000
 set /a Mbps_DEC = (V_BITRATE_DOUBLED_KBPS %% 1000) / 100
-echo   [3] Doubled Bitrate (%Mbps_INT%.%Mbps_DEC% Mbps) - Insane Quality  (Est: ~%SIZE_MB_DOUBLED% MB)
+echo   [3] Doubled Bitrate (%Mbps_INT%.%Mbps_DEC% Mbps) - Insane Quality (Est: ~%SIZE_MB_DOUBLED% MB)
 echo.
 echo   [4] Lossless - Perfect Quality (Est: Unknown, VERY large file)
 echo   [5] Custom Bitrate...
 echo.
 
+:: User input handling
 set "USER_CHOICE="
 set /p USER_CHOICE="Select an option [Default is 2]: "
-
-:: Handle default if input is empty
 if "%USER_CHOICE%"=="" set USER_CHOICE=2
-
-:: Process the choice
-if "%USER_CHOICE%"=="1" set FINAL_V_BITRATE=%V_BITRATE_HALVED_KBPS%& goto :SpeedPresetMenu
-if "%USER_CHOICE%"=="2" set FINAL_V_BITRATE=%V_BITRATE_NORMAL_KBPS%& goto :SpeedPresetMenu
-if "%USER_CHOICE%"=="3" set FINAL_V_BITRATE=%V_BITRATE_DOUBLED_KBPS%& goto :SpeedPresetMenu
-if "%USER_CHOICE%"=="4" set "ENCODE_MODE=LOSSLESS"& goto :SpeedPresetMenu
+if "%USER_CHOICE%"=="1" set FINAL_V_BITRATE=%V_BITRATE_HALVED_KBPS%& goto :EncoderMenu
+if "%USER_CHOICE%"=="2" set FINAL_V_BITRATE=%V_BITRATE_NORMAL_KBPS%& goto :EncoderMenu
+if "%USER_CHOICE%"=="3" set FINAL_V_BITRATE=%V_BITRATE_DOUBLED_KBPS%& goto :EncoderMenu
+if "%USER_CHOICE%"=="4" set "ENCODE_MODE=LOSSLESS"& goto :EncoderMenu
 if "%USER_CHOICE%"=="5" goto :CustomBitrateMenu
-
-:: If we reach here, the input was invalid
 echo.
-echo Invalid option: "%USER_CHOICE%". Please enter 1, 2, 3, 4, or 5.
+echo Invalid option: "%USER_CHOICE%". Please enter 1, 2, 3, 4 or 5.
 timeout /t 2 /nobreak >nul
 goto :VideoQualityMenu
 
 :CustomBitrateMenu
 cls
 echo =================================================================
-echo  Step 1a: Enter Custom Bitrate
+echo  Step 2a: Enter Custom Bitrate
 echo =================================================================
 echo.
 set /p CUSTOM_MBPS="Enter desired video bitrate in Mbps (e.g., 20): "
@@ -219,54 +255,153 @@ if %CHECK_BITRATE% leq 0 (
     echo.
     echo Invalid input. Please enter a positive number.
     timeout /t 2 /nobreak >nul
-    goto :VideoQualityMenu
+    goto :CustomBitrateMenu
 )
 
 :: Convert Mbps to kbps for FFmpeg
 set /a FINAL_V_BITRATE = %CUSTOM_MBPS% * 1000
-goto :SpeedPresetMenu
+goto :EncoderMenu
+
+:EncoderMenu
+cls
+echo =================================================================
+echo  Step 3: Choose Encoder
+echo =================================================================
+echo.
+echo If you have a supported GPU, hardware (GPU) encoding is often a
+echo lot faster than software (CPU) encoding.
+echo It's recommended to use hardware encoding whenever possible.
+echo.
+echo NOTE: If you selected "Lossless" in Step 2, CPU will always be
+echo used to ensure data integrity.
+echo.
+echo   [1] CPU (x264) (Default)
+echo   [2] GPU - NVIDIA (NVENC)
+echo   [3] GPU - AMD (AMF)
+echo   [4] GPU - Intel (QSV)
+echo.
+
+:: User input handling
+set "USER_CHOICE="
+set "ENCODER_TYPE="
+set "ENCODER_LIB="
+set /p USER_CHOICE="Select an option [Default is 1]: "
+if "%USER_CHOICE%"=="" set USER_CHOICE=1
+if "%USER_CHOICE%"=="1" (
+    set "ENCODER_TYPE=CPU"
+    set "ENCODER_LIB=libx264"
+    goto :SpeedPresetMenu
+)
+if "%USER_CHOICE%"=="2" (
+    set "ENCODER_TYPE=NVIDIA"
+    set "ENCODER_LIB=h264_nvenc"
+    goto :SpeedPresetMenu
+)
+if "%USER_CHOICE%"=="3" (
+    set "ENCODER_TYPE=AMD"
+    set "ENCODER_LIB=h264_amf"
+    goto :SpeedPresetMenu
+)
+if "%USER_CHOICE%"=="4" (
+    set "ENCODER_TYPE=INTEL"
+    set "ENCODER_LIB=h264_qsv"
+    goto :SpeedPresetMenu
+)
+if "%ENCODE_MODE%"=="LOSSLESS" (
+    if not "%ENCODER_TYPE%"=="CPU" (
+        echo.
+        set "ENCODER_TYPE=CPU"
+        set "ENCODER_LIB=libx264"
+    )
+    goto :SpeedPresetMenu
+)
+echo.
+echo Invalid option: "%USER_CHOICE%". Please enter 1, 2, 3 or 4.
+timeout /t 2 /nobreak >nul
+goto :EncoderMenu
 
 :SpeedPresetMenu
 cls
 echo =================================================================
-echo  Step 2: Choose Encoding Speed
+echo  Step 4: Choose Encoding Preset (for %ENCODER_TYPE%)
 echo =================================================================
 echo.
-echo Slower speeds produce slightly better quality for the same file
-echo size, but take significantly longer to encode.
+echo Choose your balance between speed and quality, where Slow gives
+echo the highest quality, and Fast the lowest. It's generally not
+echo recommended to use Fast, as you'll likely be limited by disk speed.
 echo.
-echo   [1] Very Fast (Lower quality, very fast encode)
-echo   [2] Medium    (Good balance, default)
-echo   [3] Slower    (Best quality, slow encode)
+if "%ENCODER_TYPE%"=="CPU" (
+    echo Actual x264 presets: Fast=superfast, Medium=faster, Slow=medium
+)
+if "%ENCODER_TYPE%"=="NVIDIA" (
+    echo Actual NVENC presets: Fast=p2, Medium=p4, Slow=p7
+)
+if "%ENCODER_TYPE%"=="AMD" (
+    echo Actual AMF presets: Fast=speed, Medium=balanced, Slow=quality
+)
+if "%ENCODER_TYPE%"=="INTEL" (
+    echo Actual QSV presets: Fast=veryfast, Medium=medium, Slow=veryslow
+)
+echo.
+echo   [1] Fast
+echo   [2] Medium (Default)
+echo   [3] Slow
 echo.
 
 :: User input handling
 set "USER_CHOICE="
 set /p USER_CHOICE="Select an option [Default is 2]: "
 if "%USER_CHOICE%"=="" set USER_CHOICE=2
-set "PRESET_VALID=0"
-if "%USER_CHOICE%"=="1" set FINAL_PRESET=veryfast& set "PRESET_VALID=1"
-if "%USER_CHOICE%"=="2" set FINAL_PRESET=medium& set "PRESET_VALID=1"
-if "%USER_CHOICE%"=="3" set FINAL_PRESET=slower& set "PRESET_VALID=1"
-if %PRESET_VALID% equ 1 (
-    if %A_CHANNELS% equ 0 (
-        echo.
-        echo No audio track detected, skipping audio options...
-        timeout /t 1 /nobreak >nul
-        goto :OutputPathMenu
-    ) else (
-        goto :AudioMenu
-    )
+if "%ENCODER_TYPE%"=="CPU" (
+    if "%USER_CHOICE%"=="1" set "FINAL_PRESET=superfast"& goto :PreAudioMenu
+    if "%USER_CHOICE%"=="2" set "FINAL_PRESET=faster"& goto :PreAudioMenu
+    if "%USER_CHOICE%"=="3" set "FINAL_PRESET=medium"& goto :PreAudioMenu
+    echo.
+    echo Invalid option: "%USER_CHOICE%". Please enter 1, 2 or 3.
+    timeout /t 2 /nobreak >nul
+    goto :SpeedPresetMenu
 )
-echo Invalid option: "%USER_CHOICE%". Please enter 1, 2, or 3.
-timeout /t 2 /nobreak >nul
-goto :SpeedPresetMenu
+if "%ENCODER_TYPE%"=="NVIDIA" (
+    if "%USER_CHOICE%"=="1" set "FINAL_PRESET=p2"& goto :PreAudioMenu
+    if "%USER_CHOICE%"=="2" set "FINAL_PRESET=p5"& goto :PreAudioMenu
+    if "%USER_CHOICE%"=="3" set "FINAL_PRESET=p7"& goto :PreAudioMenu
+    echo.
+    echo Invalid option: "%USER_CHOICE%". Please enter 1, 2 or 3.
+    timeout /t 2 /nobreak >nul
+    goto :SpeedPresetMenu
+)
+if "%ENCODER_TYPE%"=="AMD" (
+    if "%USER_CHOICE%"=="1" set "FINAL_PRESET=speed"& goto :PreAudioMenu
+    if "%USER_CHOICE%"=="2" set "FINAL_PRESET=balanced"& goto :PreAudioMenu
+    if "%USER_CHOICE%"=="3" set "FINAL_PRESET=quality"& goto :PreAudioMenu
+    echo.
+    echo Invalid option: "%USER_CHOICE%". Please enter 1, 2 or 3.
+    timeout /t 2 /nobreak >nul
+    goto :SpeedPresetMenu
+)
+if "%ENCODER_TYPE%"=="INTEL" (
+    if "%USER_CHOICE%"=="1" set "FINAL_PRESET=veryfast"& goto :PreAudioMenu
+    if "%USER_CHOICE%"=="2" set "FINAL_PRESET=medium"& goto :PreAudioMenu
+    if "%USER_CHOICE%"=="3" set "FINAL_PRESET=veryslow"& goto :PreAudioMenu
+    echo.
+    echo Invalid option: "%USER_CHOICE%". Please enter 1, 2 or 3.
+    timeout /t 2 /nobreak >nul
+    goto :SpeedPresetMenu
+)
+
+:PreAudioMenu
+:: Check for audio skipping
+if %A_CHANNELS% equ 0 (
+    goto :OutputPathMenu
+) else (
+    goto :AudioMenu
+)
 
 :AudioMenu
 cls
-echo ==========================================================
-echo  Step 3: Choose Audio Format
-echo ==========================================================
+echo =================================================================
+echo  Step 5: Choose Audio Format
+echo =================================================================
 echo.
 
 :: --- Calculate bitrates for menu display ---
@@ -274,20 +409,15 @@ set OPUS_BITRATE_KBPS=160
 if %A_CHANNELS% gtr 2 set OPUS_BITRATE_KBPS=512
 set /a WAV_BITRATE_KBPS = 48 * 16 * A_CHANNELS
 
-echo   [1] Opus - %OPUS_BITRATE_KBPS% kbps (High Quality, Efficient) (Default)
+echo   [1] Opus - %OPUS_BITRATE_KBPS% kbps (Very High Quality, Efficient) (Default)
 echo   [2] WAV  - %WAV_BITRATE_KBPS% kbps (Lossless, Large File Size) (Experimental)
 echo.
 
+:: User input handling
 set "USER_CHOICE="
 set /p USER_CHOICE="Select an option [Default is 1]: "
-
-:: Handle default if input is empty
 if "%USER_CHOICE%"=="" set USER_CHOICE=1
-
-:: Set default mapping mode for non-surround sources (stereo or mono)
 set "AUDIO_MAPPING_MODE=PASSTHROUGH"
-
-:: Process the choice
 if "%USER_CHOICE%"=="1" (
     set FINAL_A_CODEC=libopus
     set FINAL_A_BITRATE=%OPUS_BITRATE_KBPS%
@@ -300,8 +430,6 @@ if "%USER_CHOICE%"=="2" (
     if %A_CHANNELS% gtr 2 goto :AudioMappingMenu
     goto :OutputPathMenu
 )
-
-:: If we reach here, the input was invalid
 echo.
 echo Invalid option: "%USER_CHOICE%". Please enter 1 or 2.
 timeout /t 2 /nobreak >nul
@@ -309,9 +437,9 @@ goto :AudioMenu
 
 :AudioMappingMenu
 cls
-echo ==========================================================
-echo  Step 3a: Choose Surround Sound Format
-echo ==========================================================
+echo =================================================================
+echo  Step 5a: Choose Surround Sound Format
+echo =================================================================
 echo.
 echo Your source file has surround sound (%A_CHANNELS% channels).
 echo For YouTube, you must provide a Stereo track. You can optionally
@@ -321,13 +449,10 @@ echo   [1] Downmix to Stereo (Single Audio Track)
 echo   [2] Create "Stereo + 5.1" (Two Audio Tracks) - RECOMMENDED
 echo.
 
+:: User input handling
 set "USER_CHOICE="
 set /p USER_CHOICE="Select an option [Default is 2]: "
-
-:: Handle default if input is empty
 if "%USER_CHOICE%"=="" set USER_CHOICE=2
-
-:: User input handling
 if "%USER_CHOICE%"=="1" (
     set "AUDIO_MAPPING_MODE=STEREO_ONLY"
     goto :OutputPathMenu
@@ -336,8 +461,6 @@ if "%USER_CHOICE%"=="2" (
     set "AUDIO_MAPPING_MODE=STEREO_PLUS_51"
     goto :OutputPathMenu
 )
-
-:: If we reach here, the input was invalid
 echo.
 echo Invalid option: "%USER_CHOICE%". Please enter 1 or 2.
 timeout /t 2 /nobreak >nul
@@ -346,7 +469,7 @@ goto :AudioMappingMenu
 :OutputPathMenu
 cls
 echo =================================================================
-echo  Step 4: Set Output Location
+echo  Step 6: Set Output Location
 echo =================================================================
 echo.
 echo The final video will be saved as "%INPUT_NAME%_YouTube.mp4"
@@ -372,9 +495,9 @@ if %GOP_SIZE% lss 1 set GOP_SIZE=1
 
 :: Build Final FFmpeg Video Parameters
 if "%ENCODE_MODE%"=="LOSSLESS" (
-    set "FFMPEG_VIDEO_PARAMS=-c:v libx264 -profile:v high -preset %FINAL_PRESET% -qp 0 -g %GOP_SIZE% -keyint_min %GOP_SIZE% -bf 2 -pix_fmt yuv42p"
+    set "FFMPEG_VIDEO_PARAMS=-c:v libx264 -profile:v high -preset %FINAL_PRESET% -qp 0 -g %GOP_SIZE% -keyint_min %GOP_SIZE% -bf 2 %SCALE_FILTER% -pix_fmt yuv420p"
 ) else (
-    set "FFMPEG_VIDEO_PARAMS=-c:v libx264 -profile:v high -preset %FINAL_PRESET% -b:v %FINAL_V_BITRATE%k -g %GOP_SIZE% -keyint_min %GOP_SIZE% -bf 2 -pix_fmt yuv420p"
+    set "FFMPEG_VIDEO_PARAMS=-c:v %ENCODER_LIB% -profile:v high -preset %FINAL_PRESET% -b:v %FINAL_V_BITRATE%k %SCALE_FILTER% -g %GOP_SIZE% -keyint_min %GOP_SIZE% -bf 2 -pix_fmt yuv420p"
 )
 
 :: Conditionally set audio parameters based on the chosen codec and mapping
@@ -433,10 +556,9 @@ echo   ---------------------------------------------------------------
 echo   Output Settings:
 echo   ---------------------------------------------------------------
 echo   Container:      MP4 (Fast Start)
-echo   Video Codec:    H.264 (libx264)
+echo   Video Codec:    H.264 (%ENCODER_LIB% @ %FINAL_PRESET%)
 echo   Settings:       High, 4:2:0, 2 B-Frames, Closed GOP
 echo   GOP Size:       %GOP_SIZE%
-echo   Speed Preset:   %FINAL_PRESET%
 :: Video bitrate display decider
 if "%ENCODE_MODE%"=="LOSSLESS" (
     echo   Video Quality:  Lossless (QP 0)
@@ -500,19 +622,24 @@ if /i not "%USER_CHOICE%"=="Y" (
     goto :End
 )
 
-:: --- 5. START THE FFMPEG PROCESS (2-PASS ENCODING) ---
+:: --- 5. START THE FFMPEG PROCESS ---
 cls
 echo =================================================================
 echo  Starting Conversion... This may take a long time.
 echo =================================================================
 echo.
 
-if "%ENCODE_MODE%"=="LOSSLESS" (
-    echo --- Encoding in a single pass ^(Lossless mode^)... ---
-    ffmpeg -i "%INPUT_FILE%" %FFMPEG_VIDEO_PARAMS% %FFMPEG_AUDIO_PARAMS% -movflags +faststart "%OUTPUT_FILE%"
+set "DO_2PASS=0"
+if "%ENCODE_MODE%"=="BITRATE" (
+    if "%ENCODER_TYPE%"=="CPU" set "DO_2PASS=1"
+)
+set "SILENT_FLAGS=-hide_banner -loglevel error -stats"
+if "%DO_2PASS%"=="0" (
+    echo --- Encoding in a single pass ^(%ENCODER_TYPE% / %ENCODE_MODE%^)... ---
+    ffmpeg %SILENT_FLAGS% -i "%INPUT_FILE%" %FFMPEG_VIDEO_PARAMS% %FFMPEG_AUDIO_PARAMS% -map 0:a:0? -movflags +faststart "%OUTPUT_FILE%"
 ) else (
     echo --- Pass 1 of 2: Analyzing video... ---
-    ffmpeg -y -i "%INPUT_FILE%" %FFMPEG_VIDEO_PARAMS% -pass 1 -passlogfile "%PASSLOG_FILE%" -an -f mp4 NUL
+    ffmpeg %SILENT_FLAGS% -y -i "%INPUT_FILE%" %FFMPEG_VIDEO_PARAMS% -pass 1 -passlogfile "%PASSLOG_FILE%" -an -f mp4 NUL
     if !errorlevel! neq 0 (
         echo.
         echo ERROR: FFmpeg Pass 1 failed!
@@ -520,9 +647,10 @@ if "%ENCODE_MODE%"=="LOSSLESS" (
     )
     echo.
     echo --- Pass 2 of 2: Encoding final video with audio... ---
-    ffmpeg -i "%INPUT_FILE%" %FFMPEG_VIDEO_PARAMS% -pass 2 -passlogfile "%PASSLOG_FILE%" %FFMPEG_AUDIO_PARAMS% -movflags +faststart "%OUTPUT_FILE%"
+    ffmpeg %SILENT_FLAGS% -i "%INPUT_FILE%" %FFMPEG_VIDEO_PARAMS% -pass 2 -passlogfile "%PASSLOG_FILE%" %FFMPEG_AUDIO_PARAMS% -movflags +faststart "%OUTPUT_FILE%"
 )
 if !errorlevel! neq 0 (
+    echo.
     echo.
     echo ERROR: FFmpeg conversion failed!
     goto :ErrorExit
