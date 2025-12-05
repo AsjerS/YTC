@@ -598,7 +598,11 @@ echo   ---------------------------------------------------------------
 echo   Output Settings:
 echo   ---------------------------------------------------------------
 echo   Container:      MP4 (Fast Start)
-echo   Video Codec:    H.264 (%ENCODER_LIB% @ %FINAL_PRESET%)
+if %IS_HDR% equ 1 (
+    echo   Video Codec:    H.265/HEVC (%ENCODER_LIB% @ %FINAL_PRESET%)
+) else (
+    echo   Video Codec:    H.264/AVC (%ENCODER_LIB% @ %FINAL_PRESET%)
+)
 echo   Settings:       High, 4:2:0, 2 B-Frames, Closed GOP
 echo   GOP Size:       %GOP_SIZE%
 :: Video bitrate display decider
