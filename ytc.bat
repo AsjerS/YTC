@@ -212,11 +212,11 @@ set /a SIZE_MB_DOUBLED = (TOTAL_KBPS_DOUBLED * DURATION) / 8 / 1024
 :: Convert kbps to Mbps for display
 set /a Mbps_INT = V_BITRATE_HALVED_KBPS / 1000
 set /a Mbps_DEC = (V_BITRATE_HALVED_KBPS %% 1000) / 100
-echo   [1] Halved Bitrate  (%Mbps_INT%.%Mbps_DEC% Mbps) - Faster Uploads (Est: ~%SIZE_MB_HALVED% MB)
+echo   [1] Halved Bitrate (%Mbps_INT%.%Mbps_DEC% Mbps) - Faster Uploads (Est: ~%SIZE_MB_HALVED% MB)
 
 set /a Mbps_INT = V_BITRATE_NORMAL_KBPS / 1000
 set /a Mbps_DEC = (V_BITRATE_NORMAL_KBPS %% 1000) / 100
-echo   [2] Normal Bitrate  (%Mbps_INT%.%Mbps_DEC% Mbps) - High Quality   (Est: ~%SIZE_MB_NORMAL% MB) (Default)
+echo   [2] Normal Bitrate (%Mbps_INT%.%Mbps_DEC% Mbps) - High Quality (Est: ~%SIZE_MB_NORMAL% MB) (Default)
 
 set /a Mbps_INT = V_BITRATE_DOUBLED_KBPS / 1000
 set /a Mbps_DEC = (V_BITRATE_DOUBLED_KBPS %% 1000) / 100
@@ -275,7 +275,11 @@ echo.
 echo NOTE: If you selected "Lossless" in Step 2, CPU will always be
 echo used to ensure data integrity.
 echo.
-echo   [1] CPU (x264) (Default)
+if %IS_HDR% equ 1 (
+    echo   [1] CPU ^(x265^) ^(Default^)
+) else (
+    echo   [1] CPU ^(x264^) ^(Default^)
+)
 echo   [2] GPU - NVIDIA (NVENC)
 echo   [3] GPU - AMD (AMF)
 echo   [4] GPU - Intel (QSV)
@@ -289,22 +293,18 @@ set /p USER_CHOICE="Select an option [Default is 1]: "
 if "%USER_CHOICE%"=="" set USER_CHOICE=1
 if "%USER_CHOICE%"=="1" (
     set "ENCODER_TYPE=CPU"
-    set "ENCODER_LIB=libx264"
     goto :SpeedPresetMenu
 )
 if "%USER_CHOICE%"=="2" (
     set "ENCODER_TYPE=NVIDIA"
-    set "ENCODER_LIB=h264_nvenc"
     goto :SpeedPresetMenu
 )
 if "%USER_CHOICE%"=="3" (
     set "ENCODER_TYPE=AMD"
-    set "ENCODER_LIB=h264_amf"
     goto :SpeedPresetMenu
 )
 if "%USER_CHOICE%"=="4" (
     set "ENCODER_TYPE=INTEL"
-    set "ENCODER_LIB=h264_qsv"
     goto :SpeedPresetMenu
 )
 if "%ENCODE_MODE%"=="LOSSLESS" (
@@ -331,7 +331,7 @@ echo the highest quality, and Fast the lowest. It's generally not
 echo recommended to use Fast, as you'll likely be limited by disk speed.
 echo.
 if "%ENCODER_TYPE%"=="CPU" (
-    echo Actual x264 presets: Fast=superfast, Medium=faster, Slow=medium
+    echo Actual x264/x265 presets: Fast=superfast, Medium=faster, Slow=medium
 )
 if "%ENCODER_TYPE%"=="NVIDIA" (
     echo Actual NVENC presets: Fast=p2, Medium=p4, Slow=p7
@@ -494,10 +494,52 @@ set /a GOP_SIZE = (V_FR_NUM + GOP_SIZE_DEN / 2) / GOP_SIZE_DEN
 if %GOP_SIZE% lss 1 set GOP_SIZE=1
 
 :: Build Final FFmpeg Video Parameters
-if "%ENCODE_MODE%"=="LOSSLESS" (
-    set "FFMPEG_VIDEO_PARAMS=-c:v libx264 -profile:v high -preset %FINAL_PRESET% -qp 0 -g %GOP_SIZE% -keyint_min %GOP_SIZE% -bf 2 %SCALE_FILTER% -pix_fmt yuv420p"
+set "COLOR_FLAGS="
+if %IS_HDR% equ 1 (
+    set "COLOR_FLAGS=-color_primaries bt2020 -color_trc smpte2084 -colorspace bt2020nc"
+
+    if "%ENCODER_TYPE%"=="CPU" (
+        set "ENCODER_LIB=libx265"
+        set "ENC_PIX_FMT=yuv420p10le"
+        set "ENC_PROFILE=main10"
+        if "%ENCODE_MODE%"=="LOSSLESS" set "X265_PARAMS=-x265-params lossless=1"
+    )
+    if "%ENCODER_TYPE%"=="NVIDIA" (
+        set "ENCODER_LIB=hevc_nvenc"
+        set "ENC_PIX_FMT=p010le" 
+        set "ENC_PROFILE=main10"
+    )
+    if "%ENCODER_TYPE%"=="AMD" (
+        set "ENCODER_LIB=hevc_amf"
+        set "ENC_PIX_FMT=yuv420p10le"
+        set "ENC_PROFILE=main10"
+    )
+    if "%ENCODER_TYPE%"=="INTEL" (
+        set "ENCODER_LIB=hevc_qsv"
+        set "ENC_PIX_FMT=p010le"
+        set "ENC_PROFILE=main10"
+    )
 ) else (
-    set "FFMPEG_VIDEO_PARAMS=-c:v %ENCODER_LIB% -profile:v high -preset %FINAL_PRESET% -b:v %FINAL_V_BITRATE%k %SCALE_FILTER% -g %GOP_SIZE% -keyint_min %GOP_SIZE% -bf 2 -pix_fmt yuv420p"
+    set "COLOR_FLAGS=-color_primaries bt709 -color_trc bt709 -colorspace bt709"
+
+    if "%ENCODER_TYPE%"=="CPU" set "ENCODER_LIB=libx264"
+    if "%ENCODER_TYPE%"=="NVIDIA" set "ENCODER_LIB=h264_nvenc"
+    if "%ENCODER_TYPE%"=="AMD" set "ENCODER_LIB=h264_amf"
+    if "%ENCODER_TYPE%"=="INTEL" set "ENCODER_LIB=h264_qsv"
+    
+    set "ENC_PIX_FMT=yuv420p"
+    set "ENC_PROFILE=high"
+)
+
+:: --- Build Final FFmpeg Parameter String ---
+if "%ENCODE_MODE%"=="LOSSLESS" (
+    if %IS_HDR% equ 1 (
+        set "FFMPEG_VIDEO_PARAMS=-c:v %ENCODER_LIB% -profile:v %ENC_PROFILE% -preset %FINAL_PRESET% %X265_PARAMS% %COLOR_FLAGS% %SCALE_FILTER% -pix_fmt %ENC_PIX_FMT%"
+    ) else (
+        set "FFMPEG_VIDEO_PARAMS=-c:v %ENCODER_LIB% -profile:v %ENC_PROFILE% -preset %FINAL_PRESET% -qp 0 -g %GOP_SIZE% -keyint_min %GOP_SIZE% -bf 2 %COLOR_FLAGS% %SCALE_FILTER% -pix_fmt %ENC_PIX_FMT%"
+    )
+) else (
+    set "FFMPEG_VIDEO_PARAMS=-c:v %ENCODER_LIB% -profile:v %ENC_PROFILE% -preset %FINAL_PRESET% -b:v %FINAL_V_BITRATE%k %COLOR_FLAGS% %SCALE_FILTER% -g %GOP_SIZE% -keyint_min %GOP_SIZE% -bf 2 -pix_fmt %ENC_PIX_FMT%"
 )
 
 :: Conditionally set audio parameters based on the chosen codec and mapping
