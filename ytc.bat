@@ -199,31 +199,54 @@ echo.
 :: Calculate estimated file sizes
 set /a V_BITRATE_NORMAL_KBPS = %V_BITRATE_REC% * 1000
 set /a V_BITRATE_HALVED_KBPS = V_BITRATE_NORMAL_KBPS / 2
+set /a V_BITRATE_1_5_KBPS = V_BITRATE_NORMAL_KBPS * 3 / 2
 set /a V_BITRATE_DOUBLED_KBPS = V_BITRATE_NORMAL_KBPS * 2
 
 set /a TOTAL_KBPS_HALVED = V_BITRATE_HALVED_KBPS + A_BITRATE_REC
 set /a TOTAL_KBPS_NORMAL = V_BITRATE_NORMAL_KBPS + A_BITRATE_REC
+set /a TOTAL_KBPS_1_5 = V_BITRATE_1_5_KBPS + A_BITRATE_REC
 set /a TOTAL_KBPS_DOUBLED = V_BITRATE_DOUBLED_KBPS + A_BITRATE_REC
 
 set /a SIZE_MB_HALVED = (TOTAL_KBPS_HALVED * DURATION) / 8 / 1024
 set /a SIZE_MB_NORMAL = (TOTAL_KBPS_NORMAL * DURATION) / 8 / 1024
+set /a SIZE_MB_1_5 = (TOTAL_KBPS_1_5 * DURATION) / 8 / 1024
 set /a SIZE_MB_DOUBLED = (TOTAL_KBPS_DOUBLED * DURATION) / 8 / 1024
+
+set "WARN_HALVED="
+set "WARN_NORMAL="
+set "WARN_1_5="
+set "WARN_DOUBLED="
+
+if %SIZE_MB_HALVED% gtr 262144 set "WARN_HALVED= [! >256 GB LIMIT !]"
+if %SIZE_MB_NORMAL% gtr 262144 set "WARN_NORMAL= [! >256 GB LIMIT !]"
+if %SIZE_MB_1_5% gtr 262144 set "WARN_1_5= [! >256 GB LIMIT !]"
+if %SIZE_MB_DOUBLED% gtr 262144 set "WARN_DOUBLED= [! >256 GB LIMIT !]"
+
+echo NOTE: the quality names can be a bit misleading, as going above
+echo ~1.5x bitrate doesn't noticably improve quality for almost
+echo all types of content.
+echo.
+echo.
 
 :: Convert kbps to Mbps for display
 set /a Mbps_INT = V_BITRATE_HALVED_KBPS / 1000
 set /a Mbps_DEC = (V_BITRATE_HALVED_KBPS %% 1000) / 100
-echo   [1] Halved Bitrate (%Mbps_INT%.%Mbps_DEC% Mbps) - Faster Uploads (Est: ~%SIZE_MB_HALVED% MB)
+echo   [1] Halved Bitrate  (%Mbps_INT%.%Mbps_DEC% Mbps) - Faster Uploads (Est: ~%SIZE_MB_HALVED% MB)%WARN_HALVED%
 
 set /a Mbps_INT = V_BITRATE_NORMAL_KBPS / 1000
 set /a Mbps_DEC = (V_BITRATE_NORMAL_KBPS %% 1000) / 100
-echo   [2] Normal Bitrate (%Mbps_INT%.%Mbps_DEC% Mbps) - High Quality (Est: ~%SIZE_MB_NORMAL% MB) (Default)
+echo   [2] Normal Bitrate  (%Mbps_INT%.%Mbps_DEC% Mbps) - High Quality (Est: ~%SIZE_MB_NORMAL% MB)%WARN_NORMAL% (Default)
+
+set /a Mbps_INT = V_BITRATE_1_5_KBPS / 1000
+set /a Mbps_DEC = (V_BITRATE_1_5_KBPS %% 1000) / 100
+echo   [3] 1.5x Bitrate    (%Mbps_INT%.%Mbps_DEC% Mbps) - Really High Quality  (Est: ~%SIZE_MB_1_5% MB)%WARN_1_5%
 
 set /a Mbps_INT = V_BITRATE_DOUBLED_KBPS / 1000
 set /a Mbps_DEC = (V_BITRATE_DOUBLED_KBPS %% 1000) / 100
-echo   [3] Doubled Bitrate (%Mbps_INT%.%Mbps_DEC% Mbps) - Insane Quality (Est: ~%SIZE_MB_DOUBLED% MB)
+echo   [4] Doubled Bitrate (%Mbps_INT%.%Mbps_DEC% Mbps) - Insane Quality (Est: ~%SIZE_MB_DOUBLED% MB)%WARN_DOUBLED%
 echo.
-echo   [4] Lossless - Perfect Quality (Est: Unknown, VERY large file)
-echo   [5] Custom Bitrate...
+echo   [5] Lossless - Perfect Quality (Est: Unknown, VERY large file)
+echo   [6] Custom Bitrate...
 echo.
 
 :: User input handling
@@ -232,11 +255,12 @@ set /p USER_CHOICE="Select an option [Default is 2]: "
 if "%USER_CHOICE%"=="" set USER_CHOICE=2
 if "%USER_CHOICE%"=="1" set FINAL_V_BITRATE=%V_BITRATE_HALVED_KBPS%& goto :EncoderMenu
 if "%USER_CHOICE%"=="2" set FINAL_V_BITRATE=%V_BITRATE_NORMAL_KBPS%& goto :EncoderMenu
-if "%USER_CHOICE%"=="3" set FINAL_V_BITRATE=%V_BITRATE_DOUBLED_KBPS%& goto :EncoderMenu
-if "%USER_CHOICE%"=="4" set "ENCODE_MODE=LOSSLESS"& goto :EncoderMenu
-if "%USER_CHOICE%"=="5" goto :CustomBitrateMenu
+if "%USER_CHOICE%"=="3" set FINAL_V_BITRATE=%V_BITRATE_1_5_KBPS%& goto :EncoderMenu
+if "%USER_CHOICE%"=="4" set FINAL_V_BITRATE=%V_BITRATE_DOUBLED_KBPS%& goto :EncoderMenu
+if "%USER_CHOICE%"=="5" set "ENCODE_MODE=LOSSLESS"& goto :EncoderMenu
+if "%USER_CHOICE%"=="6" goto :CustomBitrateMenu
 echo.
-echo Invalid option: "%USER_CHOICE%". Please enter 1, 2, 3, 4 or 5.
+echo Invalid option: "%USER_CHOICE%". Please enter 1, 2, 3, 4, 5 or 6.
 timeout /t 2 /nobreak >nul
 goto :VideoQualityMenu
 
